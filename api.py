@@ -93,10 +93,61 @@ def root():
         placeholder="MyDotに話しかける..."
         autofocus
     >
+    <button id="mic-button" onclick="startVoice()">🎤</button>
     <button onclick="sendMessage()">送信</button>
 </div>
 
 <script>
+const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+
+let recognition = null;
+
+if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+
+    recognition.lang = "ja-JP";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+
+    recognition.onstart = function() {
+        document.getElementById("mic-button").textContent = "🔴";
+        document.getElementById("message").placeholder = "聞いています...";
+    };
+
+    recognition.onresult = function(event) {
+        const text = event.results[0][0].transcript;
+
+        document.getElementById("message").value = text;
+
+        // 認識後、そのままMyDotへ送信
+        sendMessage();
+    };
+
+    recognition.onerror = function(event) {
+        console.error("Speech recognition error:", event.error);
+
+        document.getElementById("mic-button").textContent = "🎤";
+        document.getElementById("message").placeholder =
+            "MyDotに話しかける...";
+    };
+
+    recognition.onend = function() {
+        document.getElementById("mic-button").textContent = "🎤";
+        document.getElementById("message").placeholder =
+            "MyDotに話しかける...";
+    };
+}
+
+function startVoice() {
+    if (!recognition) {
+        alert("このブラウザは音声認識に対応していません。");
+        return;
+    }
+
+    recognition.start();
+}
+
 async function sendMessage() {
 
     const input = document.getElementById("message");
