@@ -20,6 +20,7 @@ def root():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MyDot</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
     <style>
         body {
@@ -136,8 +137,8 @@ async function sendMessage() {
             '<span class="route">[' +
             escapeHtml(data.route) +
             ']</span><br>' +
-            'MyDot: ' +
-            escapeHtml(data.answer);
+            '<strong>MyDot:</strong>' +
+            marked.parse(data.answer);
 
     } catch (error) {
 
