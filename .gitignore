@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+
+logs/
+done/
+inbox/
+workspace/
+
+hello2.txt
+systemd-test.txt
+systemd-test2.txt
