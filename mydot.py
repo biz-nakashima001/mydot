@@ -19,6 +19,43 @@ POLL_SECONDS = 3
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen3:8b"
 
+HISTORY_FILE = BASE / "state" / "conversation.json"
+MAX_HISTORY = 20
+
+def load_history():
+    if not HISTORY_FILE.exists():
+        return []
+
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            history = json.load(f)
+
+        if isinstance(history, list):
+            return history[-MAX_HISTORY:]
+
+    except Exception as e:
+        print(f"[MyDot] 履歴読み込みエラー: {e}")
+
+    return []
+
+
+def save_history():
+    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_file = HISTORY_FILE.with_suffix(".tmp")
+
+    with open(temp_file, "w", encoding="utf-8") as f:
+        json.dump(
+            conversation_history,
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    temp_file.replace(HISTORY_FILE)
+
+
+conversation_history = load_history()
 
 def classify_task(task: str) -> str:
     prompt = f"""
@@ -72,28 +109,61 @@ LOCAL:
     return "LOCAL"
 
 def run_local(task: str) -> str:
-    data = json.dumps({
+    global conversation_history
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "あなたはMyDotというパーソナルAIアシスタントです。"
+                "過去の会話を踏まえて自然に回答してください。"
+            ),
+        }
+    ]
+
+    messages.extend(conversation_history)
+
+    messages.append({
+        "role": "user",
+        "content": task,
+    })
+
+    payload = {
         "model": OLLAMA_MODEL,
         "stream": False,
         "keep_alive": -1,
-        "messages": [
-            {
-                "role": "user",
-                "content": task,
-            }
-        ],
-    }).encode("utf-8")
+        "messages": messages,
+    }
+
+    data = json.dumps(payload).encode("utf-8")
 
     request = urllib.request.Request(
         OLLAMA_URL,
         data=data,
         headers={"Content-Type": "application/json"},
+        method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=180) as response:
+    with urllib.request.urlopen(request) as response:
         result = json.loads(response.read().decode("utf-8"))
 
-    return result["message"]["content"].strip()
+    answer = result["message"]["content"]
+
+    conversation_history.append({
+        "role": "user",
+        "content": task,
+    })
+
+    conversation_history.append({
+        "role": "assistant",
+        "content": answer,
+    })
+
+    conversation_history = conversation_history[-MAX_HISTORY:]
+
+    save_history()
+
+    return answer
 
 def run_codex(task: str) -> str:
     print(f"[MyDot] Codex起動: {task}")
