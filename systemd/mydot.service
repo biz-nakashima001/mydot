@@ -1,0 +1,15 @@
+[Unit]
+Description=MyDot Personal AI Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shinya
+WorkingDirectory=/home/shinya/mydot
+ExecStart=/usr/bin/python3 /home/shinya/mydot/mydot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

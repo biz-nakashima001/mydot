@@ -1,0 +1,16 @@
+[Unit]
+Description=MyDot Ollama Model Warmup
+After=ollama.service network-online.target
+Requires=ollama.service
+
+[Service]
+Type=oneshot
+
+ExecStartPre=/bin/bash -c 'until /usr/bin/curl -sf http://localhost:11434/api/tags >/dev/null; do echo "Waiting for Ollama..."; sleep 2; done'
+
+ExecStart=/usr/bin/curl -sf http://localhost:11434/api/chat -H "Content-Type: application/json" -d "{\"model\":\"qwen3:8b\",\"stream\":false,\"keep_alive\":-1,\"messages\":[{\"role\":\"user\",\"content\":\"ready\"}]}"
+
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
