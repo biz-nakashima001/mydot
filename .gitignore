@@ -16,3 +16,6 @@ systemd-test2.txt
 *.bak
 *.bak2
 /config/
+
+# MCP virtual environment
+.venv-mcp/

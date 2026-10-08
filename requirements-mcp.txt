@@ -1,0 +1,5 @@
+# MyDot MCP server
+mcp>=1,<2
+
+# Testing
+pytest>=9,<10
