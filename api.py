@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from mydot import classify_task, run_local, run_codex
+from mydot import classify_task, run_local, run_rag, run_codex
 
 app = FastAPI(title="MyDot API")
 
@@ -272,6 +272,8 @@ def ask(request: AskRequest):
 
     if route == "CODE":
         answer = run_codex(task)
+    elif route == "RAG":
+        answer = run_rag(task)
     else:
         answer = run_local(task)
 

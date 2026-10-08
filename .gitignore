@@ -15,3 +15,4 @@ systemd-test2.txt
 /backups/
 *.bak
 *.bak2
+/config/
