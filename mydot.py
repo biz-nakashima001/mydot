@@ -2,6 +2,8 @@ import subprocess
 import time
 import json
 import urllib.request
+import fcntl
+from contextlib import contextmanager
 
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +24,23 @@ OLLAMA_MODEL = "qwen3:8b"
 HISTORY_FILE = BASE / "state" / "conversation.json"
 MAX_HISTORY = 20
 
+MEMORY_FILE = BASE / "state" / "memory.json"
+
+LOCK_FILE = BASE / "state" / "conversation.lock"
+
+
+@contextmanager
+def conversation_lock():
+    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(LOCK_FILE, "a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
 def load_history():
     if not HISTORY_FILE.exists():
         return []
@@ -31,12 +50,47 @@ def load_history():
             history = json.load(f)
 
         if isinstance(history, list):
-            return history[-MAX_HISTORY:]
+            return history
 
     except Exception as e:
         print(f"[MyDot] 履歴読み込みエラー: {e}")
 
     return []
+
+def load_memory():
+    if not MEMORY_FILE.exists():
+        return []
+
+    try:
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            memory = json.load(f)
+
+        if isinstance(memory, list):
+            return memory
+
+    except Exception as e:
+        print(f"[MyDot] 長期記憶読み込みエラー: {e}")
+
+    return []
+
+
+def save_memory(memory):
+    MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_file = MEMORY_FILE.with_suffix(".tmp")
+
+    with open(temp_file, "w", encoding="utf-8") as f:
+        json.dump(
+            memory,
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    temp_file.replace(MEMORY_FILE)
+
+
+long_term_memory = load_memory()
 
 
 def save_history():
@@ -108,16 +162,146 @@ LOCAL:
 
     return "LOCAL"
 
+def extract_memories(messages: list) -> list:
+    """会話から長期保存する価値のある情報を抽出する。"""
+
+    prompt = f"""
+あなたはMyDotの長期記憶管理AIです。
+
+以下の会話から、今後の会話で役立つ情報だけを抽出してください。
+
+保存対象:
+- ユーザーが明示した継続的な好みや方針
+- 進行中のプロジェクトの重要な設定
+- 今後も参照する必要がある決定事項
+
+保存しない情報:
+- 一時的な雑談や挨拶
+- 根拠のない推測
+- パスワード、APIキーなどの秘密情報
+- 明示的に記憶を求められていない機微な個人情報
+
+重要な情報がなければ空配列にしてください。
+
+JSON形式のみで回答してください。
+例:
+{{"memories": ["MyDotはローカルLLMを使用する"]}}
+
+会話:
+{json.dumps(messages, ensure_ascii=False)}
+"""
+
+    payload = {
+        "model": OLLAMA_MODEL,
+        "stream": False,
+        "keep_alive": -1,
+        "think": False,
+        "format": "json",
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+    }
+
+    try:
+        data = json.dumps(payload).encode("utf-8")
+
+        request = urllib.request.Request(
+            OLLAMA_URL,
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+
+        with urllib.request.urlopen(
+            request, timeout=120
+        ) as response:
+            result = json.loads(response.read().decode("utf-8"))
+
+        content = result["message"]["content"]
+
+        extracted = json.loads(content)
+
+        if not isinstance(extracted, dict):
+            raise ValueError("記憶抽出結果がJSONオブジェクトではありません")
+
+        if "memories" not in extracted:
+            raise ValueError("記憶抽出結果にmemoriesキーがありません")
+
+        memories = extracted["memories"]
+
+        if not isinstance(memories, list):
+            raise ValueError("memoriesが配列ではありません")
+
+        if not all(isinstance(item, str) for item in memories):
+            raise ValueError("memoriesに文字列以外の値が含まれています")
+
+        return [
+            item.strip()
+            for item in memories
+            if isinstance(item, str) and item.strip()
+        ]
+
+    except Exception as e:
+        print(f"[MyDot] 記憶抽出エラー: {e}")
+        raise
+
+def add_memories(memories: list) -> int:
+    """新しい長期記憶を追加する。完全一致の重複は除外する。"""
+    global long_term_memory
+
+    added = 0
+
+    for item in memories:
+        if not isinstance(item, str):
+            continue
+
+        item = item.strip()
+
+        if not item:
+            continue
+
+        if item not in long_term_memory:
+            long_term_memory.append(item)
+            added += 1
+
+    if added > 0:
+        save_memory(long_term_memory)
+
+    return added
+
+
 def run_local(task: str) -> str:
-    global conversation_history
+    with conversation_lock():
+        return _run_local_locked(task)
+
+
+def _run_local_locked(task: str) -> str:
+    global conversation_history, long_term_memory
+
+    # ロック取得後、最新のファイルを読み直す
+    conversation_history = load_history()
+    long_term_memory = load_memory()
+    memory_text = "\n".join(
+        f"- {item}" for item in long_term_memory
+    )
+
+    system_prompt = """
+    あなたはMyDotというパーソナルAIアシスタントです。
+    過去の会話を踏まえて自然に回答してください。
+
+    以下は長期記憶です。
+    必要な場合のみ回答に利用してください。
+
+    --- 長期記憶 ---
+    {memory}
+    --- 長期記憶ここまで ---
+    """.format(
+        memory=memory_text if memory_text else "なし"
+    )
 
     messages = [
         {
             "role": "system",
-            "content": (
-                "あなたはMyDotというパーソナルAIアシスタントです。"
-                "過去の会話を踏まえて自然に回答してください。"
-            ),
+            "content": system_prompt,
         }
     ]
 
@@ -159,7 +343,32 @@ def run_local(task: str) -> str:
         "content": answer,
     })
 
-    conversation_history = conversation_history[-MAX_HISTORY:]
+    # 短期記憶の上限を超えた場合
+    if len(conversation_history) > MAX_HISTORY:
+
+        overflow_count = len(conversation_history) - MAX_HISTORY
+
+        # 古い会話を取り出す
+        old_messages = conversation_history[:overflow_count]
+
+        # 先に会話履歴全体を保存し、抽出失敗時の復旧に備える
+        save_history()
+
+        try:
+            # 古い会話から重要情報を抽出
+            new_memories = extract_memories(old_messages)
+
+            # 長期記憶に追加
+            added = add_memories(new_memories)
+
+            print(f"[MyDot] 長期記憶を{added}件追加")
+
+            # 正常終了した場合だけ履歴を整理
+            conversation_history = conversation_history[-MAX_HISTORY:]
+
+        except Exception as e:
+            print(f"[MyDot] 自動記憶エラー: {e}")
+            print("[MyDot] 古い会話を保持して次回再試行します")
 
     save_history()
 
@@ -195,8 +404,6 @@ def process_task(task_file: Path):
         print(f"[MyDot] 空のタスク: {task_file.name}")
         task_file.rename(DONE / task_file.name)
         return
-
-    print(f"[MyDot] タスク検知: {task_file.name}")
 
     print(f"[MyDot] タスク検知: {task_file.name}")
 

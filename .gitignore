@@ -10,3 +10,8 @@ hello2.txt
 systemd-test.txt
 systemd-test2.txt
 .venv/
+
+/state/
+/backups/
+*.bak
+*.bak2

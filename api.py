@@ -98,55 +98,94 @@ def root():
 </div>
 
 <script>
+
 const SpeechRecognition =
     window.SpeechRecognition || window.webkitSpeechRecognition;
 
+let shouldSendOnStop = false;
 let recognition = null;
-
-if (SpeechRecognition) {
-    recognition = new SpeechRecognition();
-
-    recognition.lang = "ja-JP";
-    recognition.interimResults = false;
-    recognition.continuous = false;
-
-    recognition.onstart = function() {
-        document.getElementById("mic-button").textContent = "🔴";
-        document.getElementById("message").placeholder = "聞いています...";
-    };
-
-    recognition.onresult = function(event) {
-        const text = event.results[0][0].transcript;
-
-        document.getElementById("message").value = text;
-
-        // 認識後、そのままMyDotへ送信
-        sendMessage();
-    };
-
-    recognition.onerror = function(event) {
-        console.error("Speech recognition error:", event.error);
-
-        document.getElementById("mic-button").textContent = "🎤";
-        document.getElementById("message").placeholder =
-            "MyDotに話しかける...";
-    };
-
-    recognition.onend = function() {
-        document.getElementById("mic-button").textContent = "🎤";
-        document.getElementById("message").placeholder =
-            "MyDotに話しかける...";
-    };
-}
+let isListening = false;
+let finalTranscript = "";
 
 function startVoice() {
-    if (!recognition) {
-        alert("このブラウザは音声認識に対応していません。");
+    const SpeechRecognition =
+        window.SpeechRecognition ||
+        window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+        alert("このブラウザは音声認識に対応していません");
         return;
     }
 
+    // もう一度押したら終了
+    if (isListening) {
+        if (shouldSendOnStop) return;
+
+        shouldSendOnStop = true;
+        recognition.stop();
+        return;
+    }
+
+    shouldSendOnStop = false;
+    recognition = new SpeechRecognition();
+
+    recognition.lang = "ja-JP";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    const input = document.getElementById("message");
+    finalTranscript = input.value.trim();
+
+    recognition.onresult = (event) => {
+        let confirmed = "";
+        let interim = "";
+
+        for (let i = 0; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+
+            if (event.results[i].isFinal) {
+                confirmed += transcript;
+            } else {
+                interim += transcript;
+            }
+        }
+
+        input.value = finalTranscript + confirmed + interim;
+    };
+
+    recognition.onerror = (event) => {
+        console.error("音声認識エラー:", event.error);
+    };
+
+    recognition.onend = () => {
+        isListening = false;
+        document.getElementById("mic-button").textContent = "🎤";
+            document.getElementById("message").placeholder =
+        "MyDotに話しかける...";
+
+        if (shouldSendOnStop) {
+            shouldSendOnStop = false;
+            sendMessage();
+        }
+    };
+
+    recognition.onstart = () => {
+        document.getElementById("mic-button").textContent = "⏳";
+    };
+
+    recognition.onaudiostart = () => {
+        document.getElementById("mic-button").textContent = "🔴";
+        document.getElementById("message").placeholder =
+            "聞いています...";
+    };
+
+    document.getElementById("mic-button").textContent = "⏳";
+
     recognition.start();
+    isListening = true;
+
 }
+
 
 async function sendMessage() {
 
